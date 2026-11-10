@@ -32,3 +32,10 @@ npm run build
 Парсер — [libpg-query](https://github.com/constructive-io/libpg-query-node).
 Схема с дочерними ячейками столбцов следует подходу
 [sqltooling-drawio](https://github.com/funktechno/sqltooling-drawio).
+
+## Правки в draw.io
+
+Экспорт использует нативные таблицы draw.io. Чтобы добавить поле, выделите ячейку
+существующей строки и используйте команду вставки строки выше или ниже в панели
+таблицы. В новой строке отдельно заполните ключ, имя, тип и nullable-статус.
+Сохраните изменения в файле `.drawio`.

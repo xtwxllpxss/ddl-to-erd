@@ -3,7 +3,19 @@ import { placeTables } from './layout.js';
 const header = 34;
 const rowHeight = 25;
 const colors = { header: '#dae8fc', stroke: '#6c8ebf', ink: '#172638', edge: '#526d92' };
+const fieldPadding = 10;
+const typeColor = '#465c78';
+const nullableColor = '#46596c';
 const svgNS = 'http://www.w3.org/2000/svg';
+
+function fields(row) {
+  return [
+    { text: row.tags, color: '#254b78', bold: true },
+    { text: row.name, color: colors.ink, bold: false },
+    { text: row.type, color: typeColor, bold: false },
+    { text: row.nullability, color: nullableColor, bold: false },
+  ];
+}
 
 export function layout({ tables, links }) {
   const measure = document.createElement('canvas').getContext('2d');
@@ -16,8 +28,17 @@ export function layout({ tables, links }) {
       row.nullability = row.required ? 'NOT NULL' : 'NULL';
       row.offset = header + index * rowHeight;
     });
-    table.width = Math.ceil(Math.max(230, textWidth(table.name) + 28,
-      ...rows.map(row => textWidth(row.name + '   ' + row.type) + 150)));
+    const columnWidth = values => Math.ceil(Math.max(0, ...values.map(textWidth)) + fieldPadding * 2);
+    table.fieldWidths = [
+      columnWidth(['PK/FK']),
+      Math.max(80, columnWidth(rows.map(row => row.name))),
+      Math.max(65, columnWidth(rows.map(row => row.type))),
+      columnWidth(['NOT NULL']),
+    ];
+    table.width = table.fieldWidths.reduce((total, width) => total + width, 0);
+    const titleWidth = Math.ceil(textWidth(table.name) + 28);
+    table.fieldWidths[1] += Math.max(0, titleWidth - table.width);
+    table.width = Math.max(table.width, titleWidth);
     table.height = header + rowHeight * rows.length;
   }
   return { tables, links, ...placeTables(tables, links) };
@@ -67,14 +88,17 @@ export function preview({ tables, links, width, height }) {
       element(group, 'rect', {
         y: row.offset, width: table.width, height: rowHeight, fill: 'white', stroke: colors.stroke,
       });
-      const baseline = row.offset + 17;
-      const font = { y: baseline, 'font-family': 'monospace', 'font-size': 13 };
-      element(group, 'text', { ...font, x: 10, 'font-weight': 'bold',
-        fill: row.primary ? '#19477a' : '#773b79' }, row.tags);
-      element(group, 'text', { ...font, x: 66, fill: colors.ink }, row.name + '   ' + row.type);
-      element(group, 'text', { ...font, x: table.width - 10, 'text-anchor': 'end',
-        'font-weight': row.required ? 'bold' : 'normal',
-        fill: row.required ? '#315d46' : '#64748b' }, row.nullability);
+      let x = 0;
+      fields(row).forEach(({ text, color, bold }, index) => {
+        if (index) element(group, 'line', {
+          x1: x, x2: x, y1: row.offset, y2: row.offset + rowHeight, stroke: colors.stroke,
+        });
+        element(group, 'text', {
+          x: x + fieldPadding, y: row.offset + 17, 'font-family': 'monospace',
+          'font-size': 13, 'font-weight': bold ? 'bold' : 'normal', fill: color,
+        }, text);
+        x += table.fieldWidths[index];
+      });
     }
   }
   return svg;
@@ -95,33 +119,36 @@ export function drawio({ tables, links }) {
   add(root, 'mxCell', { id: 1, parent: 0 });
   const common = 'strokeColor=' + colors.stroke + ';fontColor=' + colors.ink + ';fontSize=13;';
 
-  function rowLabel(row) {
-    const escape = text => text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
-    const key = row.primary ? '#19477a' : '#773b79';
-    const nullable = row.required ? '#315d46' : '#64748b';
-    return '<span style="font-family:monospace;white-space:pre">' +
-      '<b style="color:' + key + '">' + row.tags.padEnd(7) + '</b>' +
-      escape(row.name + '   ' + row.type) + '</span>' +
-      '<span style="float:right;margin-right:10px;font-family:monospace;color:' + nullable +
-      ';font-weight:' + (row.required ? 'bold' : 'normal') + '">' + row.nullability + '</span>';
-  }
-
-  // As in sqltooling-drawio, rows are children of the table and are edge terminals.
+  // Native table rows remain edge terminals and can be inserted in draw.io.
   for (const table of tables) {
     const box = add(root, 'mxCell', {
       id: table.id, parent: 1, vertex: 1, value: table.name,
-      style: 'shape=swimlane;horizontal=1;container=1;collapsible=0;recursiveResize=0;' +
-        'startSize=' + header + ';fontStyle=1;fillColor=' + colors.header + ';swimlaneFillColor=#ffffff;' + common,
+      style: 'shape=table;container=1;collapsible=0;childLayout=tableLayout;fixedHeader=1;' +
+        'tableRender=collapsed;startSize=' + header + ';fontStyle=1;fillColor=' +
+        colors.header + ';swimlaneFillColor=#ffffff;' + common,
     });
     add(box, 'mxGeometry', { x: table.x, y: table.y, width: table.width, height: table.height, as: 'geometry' });
     for (const row of table.columns.values()) {
       const cell = add(root, 'mxCell', {
-        id: row.id, parent: table.id, vertex: 1, value: rowLabel(row),
-        style: 'align=left;spacingLeft=10;movable=0;resizable=0;fillColor=#ffffff;' +
-          'html=1;whiteSpace=wrap;' + common,
+        id: row.id, parent: table.id, vertex: 1,
+        style: 'shape=tableRow;horizontal=0;startSize=0;swimlaneHead=0;swimlaneBody=0;' +
+          'strokeColor=inherit;collapsible=0;dropTarget=0;fillColor=none;fixedHeader=1;' +
+          'points=[[0,0.5],[1,0.5]];portConstraint=eastwest;',
       });
       add(cell, 'mxGeometry', {
         x: 0, y: row.offset, width: table.width, height: rowHeight, as: 'geometry',
+      });
+      let x = 0;
+      fields(row).forEach(({ text, color, bold }, index) => {
+        const width = table.fieldWidths[index];
+        const field = add(root, 'mxCell', {
+          id: row.id + '-field-' + index, parent: row.id, vertex: 1, connectable: 0, value: text,
+          style: 'shape=partialRectangle;html=0;overflow=hidden;pointerEvents=1;' +
+            'strokeColor=inherit;fillColor=none;align=left;spacing=0;spacingLeft=' + fieldPadding +
+            ';fontFamily=monospace;fontSize=13;fontColor=' + color + ';fontStyle=' + Number(bold) + ';',
+        });
+        add(field, 'mxGeometry', { x, y: 0, width, height: rowHeight, as: 'geometry' });
+        x += width;
       });
     }
   }
