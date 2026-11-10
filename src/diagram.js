@@ -1,3 +1,5 @@
+import { placeTables } from './layout.js';
+
 const header = 34;
 const rowHeight = 25;
 const colors = { header: '#dae8fc', stroke: '#6c8ebf', ink: '#172638', edge: '#526d92' };
@@ -7,68 +9,18 @@ export function layout({ tables, links }) {
   const measure = document.createElement('canvas').getContext('2d');
   measure.font = '13px monospace';
   const textWidth = value => measure.measureText(value).width;
-  const across = Math.min(3, Math.ceil(Math.sqrt(tables.length)));
-  const widths = Array(across).fill(0);
-  tables.forEach((table, index) => {
+  for (const table of tables) {
     const rows = [...table.columns.values()];
-    rows.forEach((row, rowIndex) => {
-      const tags = [table.primaryKey.includes(row.name) && 'PK', row.foreign && 'FK'].filter(Boolean);
-      row.label = (tags.length ? tags.join('/') + '  ' : '') + row.name + '   ' + row.type;
-      row.offset = header + rowIndex * rowHeight;
+    rows.forEach((row, index) => {
+      row.tags = [row.primary && 'PK', row.foreign && 'FK'].filter(Boolean).join('/');
+      row.nullability = row.required ? 'NOT NULL' : 'NULL';
+      row.offset = header + index * rowHeight;
     });
-    table.width = Math.ceil(Math.max(200, textWidth(table.name) + 28,
-      ...rows.map(row => textWidth(row.label) + 26)));
+    table.width = Math.ceil(Math.max(230, textWidth(table.name) + 28,
+      ...rows.map(row => textWidth(row.name + '   ' + row.type) + 150)));
     table.height = header + rowHeight * rows.length;
-    const column = index % across;
-    widths[column] = Math.max(widths[column], table.width);
-  });
-
-  let y = 50;
-  const gutter = 104;
-  const origins = widths.map((_, index) => 48 + widths.slice(0, index)
-    .reduce((x, width) => x + width + gutter, 0));
-  for (let start = 0; start < tables.length; start += across) {
-    const group = tables.slice(start, start + across);
-    group.forEach((table, column) => {
-      table.column = column;
-      table.x = origins[column];
-      table.y = y;
-    });
-    y += Math.max(...group.map(table => table.height)) + 90;
   }
-  const width = origins.at(-1) + widths.at(-1) + 48;
-
-  const routeCounts = new Map();
-  for (const link of links) {
-    const { from, to, source, target } = link;
-    const same = from === to;
-    const right = from.column <= to.column;
-    const targetRight = from.column === to.column || !right;
-    const x1 = from.x + (right ? from.width : 0);
-    const x2 = to.x + (targetRight ? to.width : 0);
-    const y1 = from.y + source.offset + rowHeight / 2;
-    const y2 = to.y + target.offset + rowHeight / 2;
-    const key = from.id + '/' + to.id;
-    const lane = routeCounts.get(key) ?? 0;
-    routeCounts.set(key, lane + 1);
-    const gap = 18 + 5 * (lane % 6);
-    const corridor = (table, onRight) => onRight ?
-      table.x + widths[table.column] + gap : table.x - gap;
-    const a = same ? x1 + gap : corridor(from, right);
-    const b = same ? a : corridor(to, targetRight);
-    link.right = right;
-    link.targetRight = targetRight;
-    if (same && y1 === y2) {
-      link.points = [[x1, y1], [a + 6, y1], [a + 6, y1 - 16], [a, y1 - 16], [a, y2], [x2, y2]];
-    } else if (same || (from.y === to.y && Math.abs(from.column - to.column) === 1)) {
-      const elbow = same ? a : a;
-      link.points = [[x1, y1], [elbow, y1], [elbow, y2], [x2, y2]];
-    } else {
-      const track = Math.min(from.y, to.y) - gap;
-      link.points = [[x1, y1], [a, y1], [a, track], [b, track], [b, y2], [x2, y2]];
-    }
-  }
-  return { tables, links, width, height: y - 45 };
+  return { tables, links, ...placeTables(tables, links) };
 }
 
 export function preview({ tables, links, width, height }) {
@@ -81,15 +33,26 @@ export function preview({ tables, links, width, height }) {
   }
   const svg = element(null, 'svg', { width, height, role: 'img', 'aria-label': 'ER-диаграмма' });
   const defs = element(svg, 'defs', {});
-  const marker = element(defs, 'marker', {
-    id: 'arrow', viewBox: '0 0 10 10', refX: 9, refY: 5,
-    markerWidth: 8, markerHeight: 8, orient: 'auto-start-reverse',
-  });
-  element(marker, 'path', { d: 'M 1 1 L 9 5 L 1 9', fill: 'none', stroke: colors.edge });
+  const markers = {
+    ERzeroToMany: 'M 0 -5 L 10 0 L 0 5 M 10 0 H 16',
+    ERzeroToOne: 'M 5 -5 V 5 M 0 0 H 16',
+    ERmandOne: 'M 5 -5 V 5 M 12 -5 V 5',
+  };
+  for (const [id, shape] of Object.entries(markers)) for (const end of [false, true]) {
+    const marker = element(defs, 'marker', {
+      id: id + (end ? '-end' : ''), viewBox: '0 -6 25 12', refX: end ? 25 : 0, refY: 0, markerUnits: 'userSpaceOnUse',
+      markerWidth: 25, markerHeight: 12, orient: 'auto',
+    });
+    const glyph = element(marker, 'g', end ? { transform: 'translate(25 0) scale(-1 1)' } : {});
+    element(glyph, 'path', { d: shape, fill: 'none', stroke: colors.edge });
+    if (id !== 'ERmandOne') {
+      element(glyph, 'circle', { cx: 19, cy: 0, r: 3, fill: 'white', stroke: colors.edge });
+    }
+  }
   for (const link of links) {
     const line = element(svg, 'polyline', {
       points: link.points.map(point => point.join(',')).join(' '),
-      fill: 'none', stroke: colors.edge, 'stroke-width': 1.4, 'marker-end': 'url(#arrow)',
+      fill: 'none', stroke: colors.edge, 'stroke-width': 1.4, 'marker-start': 'url(#' + link.startMarker + ')', 'marker-end': 'url(#' + link.endMarker + '-end)',
     });
     element(line, 'title', {}, link.label);
   }
@@ -104,9 +67,14 @@ export function preview({ tables, links, width, height }) {
       element(group, 'rect', {
         y: row.offset, width: table.width, height: rowHeight, fill: 'white', stroke: colors.stroke,
       });
-      element(group, 'text', {
-        x: 11, y: row.offset + 17, 'font-family': 'monospace', 'font-size': 13, fill: colors.ink,
-      }, row.label);
+      const baseline = row.offset + 17;
+      const font = { y: baseline, 'font-family': 'monospace', 'font-size': 13 };
+      element(group, 'text', { ...font, x: 10, 'font-weight': 'bold',
+        fill: row.primary ? '#19477a' : '#773b79' }, row.tags);
+      element(group, 'text', { ...font, x: 66, fill: colors.ink }, row.name + '   ' + row.type);
+      element(group, 'text', { ...font, x: table.width - 10, 'text-anchor': 'end',
+        'font-weight': row.required ? 'bold' : 'normal',
+        fill: row.required ? '#315d46' : '#64748b' }, row.nullability);
     }
   }
   return svg;
@@ -127,6 +95,17 @@ export function drawio({ tables, links }) {
   add(root, 'mxCell', { id: 1, parent: 0 });
   const common = 'strokeColor=' + colors.stroke + ';fontColor=' + colors.ink + ';fontSize=13;';
 
+  function rowLabel(row) {
+    const escape = text => text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+    const key = row.primary ? '#19477a' : '#773b79';
+    const nullable = row.required ? '#315d46' : '#64748b';
+    return '<span style="font-family:monospace;white-space:pre">' +
+      '<b style="color:' + key + '">' + row.tags.padEnd(7) + '</b>' +
+      escape(row.name + '   ' + row.type) + '</span>' +
+      '<span style="float:right;margin-right:10px;font-family:monospace;color:' + nullable +
+      ';font-weight:' + (row.required ? 'bold' : 'normal') + '">' + row.nullability + '</span>';
+  }
+
   // As in sqltooling-drawio, rows are children of the table and are edge terminals.
   for (const table of tables) {
     const box = add(root, 'mxCell', {
@@ -137,9 +116,9 @@ export function drawio({ tables, links }) {
     add(box, 'mxGeometry', { x: table.x, y: table.y, width: table.width, height: table.height, as: 'geometry' });
     for (const row of table.columns.values()) {
       const cell = add(root, 'mxCell', {
-        id: row.id, parent: table.id, vertex: 1, value: row.label,
+        id: row.id, parent: table.id, vertex: 1, value: rowLabel(row),
         style: 'align=left;spacingLeft=10;movable=0;resizable=0;fillColor=#ffffff;' +
-          'fontFamily=monospace;whiteSpace=wrap;' + common,
+          'html=1;whiteSpace=wrap;' + common,
       });
       add(cell, 'mxGeometry', {
         x: 0, y: row.offset, width: table.width, height: rowHeight, as: 'geometry',
@@ -150,9 +129,10 @@ export function drawio({ tables, links }) {
     const wrapper = add(root, 'object', { id: 'relation-' + index, label: '', tooltip: link.label });
     const edge = add(wrapper, 'mxCell', {
       edge: 1, parent: 1, source: link.source.id, target: link.target.id,
-      style: 'endArrow=open;endFill=0;strokeWidth=1.4;strokeColor=' + colors.edge +
-        ';exitPerimeter=0;entryPerimeter=0;exitY=0.5;entryY=0.5;exitX=' + Number(link.right) +
-        ';entryX=' + Number(link.targetRight) + ';',
+      style: 'startArrow=' + link.startMarker + ';endArrow=' + link.endMarker +
+        ';startSize=10;endSize=10;startFill=0;endFill=0;strokeWidth=1.4;strokeColor=' + colors.edge +
+        ';exitPerimeter=0;entryPerimeter=0;exitY=0.5;entryY=' + link.entryY +
+        ';exitX=' + Number(link.sourceRight) + ';entryX=' + Number(link.targetRight) + ';',
     });
     const geometry = add(edge, 'mxGeometry', { relative: 1, as: 'geometry' });
     const waypoints = add(geometry, 'Array', { as: 'points' });

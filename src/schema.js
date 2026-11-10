@@ -37,6 +37,9 @@ export function readSchema({ stmts }) {
     if (constraint.contype === 'CONSTR_PRIMARY') {
       table.primaryKey = column ? [column.name] : names(constraint.keys);
     }
+    if (constraint.contype === 'CONSTR_UNIQUE') {
+      table.uniqueKeys.push(column ? [column.name] : names(constraint.keys));
+    }
     if (constraint.contype === 'CONSTR_FOREIGN') {
       foreignKeys.push({ table, constraint, from: column ? [column.name] : names(constraint.fk_attrs) });
     }
@@ -51,7 +54,7 @@ export function readSchema({ stmts }) {
     }
     const table = {
       id: 'table-' + tables.size, name: displayName(create.relation), relation: create.relation,
-      columns: new Map(), primaryKey: [],
+      columns: new Map(), primaryKey: [], uniqueKeys: [],
     };
     tables.set(key, table);
     for (const { ColumnDef: definition, Constraint: constraint } of create.tableElts ?? []) {
@@ -59,10 +62,11 @@ export function readSchema({ stmts }) {
       if (!definition) continue;
       const column = {
         id: table.id + '-column-' + table.columns.size, name: definition.colname,
-        type: displayType(definition.typeName), foreign: false,
+        type: displayType(definition.typeName), foreign: false, required: false,
       };
       table.columns.set(column.name, column);
       for (const { Constraint: inline } of definition.constraints ?? []) {
+        if (inline.contype === 'CONSTR_NOTNULL') column.required = true;
         addConstraint(table, inline, column);
       }
     }
@@ -71,15 +75,29 @@ export function readSchema({ stmts }) {
   for (const { stmt: { AlterTableStmt: alter } } of stmts) {
     for (const { AlterTableCmd: command } of alter?.cmds ?? []) {
       const constraint = command.def?.Constraint;
-      if (command.subtype !== 'AT_AddConstraint' ||
-        !['CONSTR_PRIMARY', 'CONSTR_FOREIGN'].includes(constraint?.contype)) continue;
       const table = resolve(alter.relation);
+      if (command.subtype === 'AT_SetNotNull' || command.subtype === 'AT_DropNotNull') {
+        const column = table?.columns.get(command.name);
+        if (column) column.required = command.subtype === 'AT_SetNotNull';
+      }
+      if (command.subtype !== 'AT_AddConstraint' ||
+        !['CONSTR_PRIMARY', 'CONSTR_FOREIGN', 'CONSTR_UNIQUE', 'CONSTR_NOTNULL'].includes(constraint?.contype)) continue;
+      if (constraint.contype === 'CONSTR_NOTNULL') {
+        const column = table?.columns.get(names(constraint.keys)[0]);
+        if (column) column.required = true;
+      }
       if (table) addConstraint(table, constraint);
       else warnings.push((constraint.conname ?? 'Ограничение') +
         ': не найдена таблица ' + displayName(alter.relation));
     }
   }
 
+  for (const table of tables.values()) {
+    for (const row of table.columns.values()) {
+      row.primary = table.primaryKey.includes(row.name);
+      row.required ||= row.primary;
+    }
+  }
   for (const { table, constraint, from } of foreignKeys) {
     const target = resolve(constraint.pktable);
     const explicit = names(constraint.pk_attrs);
@@ -94,9 +112,14 @@ export function readSchema({ stmts }) {
       warnings.push(label + ': не удалось однозначно определить пару столбцов.');
       continue;
     }
+    const unique = [table.primaryKey, ...table.uniqueKeys]
+      .some(key => key.length && key.every(name => from.includes(name)));
+    const optional = constraint.fk_matchtype === 'f' ?
+      sourceRows.every(row => !row.required) : sourceRows.some(row => !row.required);
     sourceRows.forEach((source, index) => links.push({
       source, target: targetRows[index], from: table, to: target,
-      label, name: constraint.conname ?? '',
+      label, startMarker: unique ? 'ERzeroToOne' : 'ERzeroToMany',
+      endMarker: optional ? 'ERzeroToOne' : 'ERmandOne',
     }));
   }
   return { tables: [...tables.values()], links, warnings };
