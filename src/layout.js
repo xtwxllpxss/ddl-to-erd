@@ -127,3 +127,45 @@ export function placeTables(tables, links) {
   }
   return { width, height: top };
 }
+
+// Keep the automatic layout intact for links unrelated to the moved table.
+export function moveTable(model, table, x, y) {
+  table.x = Math.max(margin, Math.round(x));
+  table.y = Math.max(margin, Math.round(y));
+
+  let lane = 0;
+  for (const link of model.links) {
+    const { from, to, source, target } = link;
+    if (from !== table && to !== table) continue;
+    const gap = 30 + trackGap * (lane++ % 8);
+    const self = from === to;
+    const separate = from.x + from.width + 60 <= to.x || to.x + to.width + 60 <= from.x;
+    link.sourceRight = self || ((from.x < to.x) === separate);
+    link.targetRight = self || !link.sourceRight;
+    const x1 = from.x + (link.sourceRight ? from.width : 0);
+    const x2 = to.x + (link.targetRight ? to.width : 0);
+    const y1 = from.y + source.offset + 12.5;
+    const y2 = to.y + target.offset + 25 * link.entryY;
+    if (self) {
+      link.points = [[x1, y1], [x1 + gap, y1], [x2 + gap, y2], [x2, y2]];
+    } else if (separate) {
+      const direction = link.sourceRight ? 1 : -1;
+      const turn = x1 + direction * Math.min(gap, Math.abs(x2 - x1) - 28);
+      const approach = y2 + (link.fanOffset || 0);
+      link.points = [[x1, y1], [turn, y1], [turn, approach],
+        [x2 - direction * 28, y2], [x2, y2]];
+    } else {
+      const left = Math.max(8, Math.min(from.x, to.x) - gap);
+      const right = Math.max(from.x + from.width, to.x + to.width) + gap;
+      const a = link.sourceRight ? right : left;
+      const b = link.targetRight ? right : left;
+      const top = Math.max(8, Math.min(from.y, to.y) - gap);
+      link.points = [[x1, y1], [a, y1], [a, top], [b, top], [b, y2], [x2, y2]];
+    }
+  }
+
+  model.width = margin + Math.max(...model.tables.map(box => box.x + box.width),
+    ...model.links.flatMap(link => link.points.map(([x]) => x)));
+  model.height = margin + Math.max(...model.tables.map(box => box.y + box.height),
+    ...model.links.flatMap(link => link.points.map(([, y]) => y)));
+}

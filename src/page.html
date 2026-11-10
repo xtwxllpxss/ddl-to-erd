@@ -21,6 +21,12 @@
   textarea { flex: 1; width: 100%; min-height: 0; resize: none; padding: 13px; border: 0; color: inherit; background: #fff; font: 13px/1.6 ui-monospace, monospace; tab-size: 2; }
   #canvas { flex: 1; min-height: 0; overflow: auto; background-color: #f9fafc; background-image: linear-gradient(#e7ebf1 1px, transparent 1px), linear-gradient(90deg, #e7ebf1 1px, transparent 1px); background-size: 10px 10px; }
   #canvas svg { display: block; }
+  #canvas [data-table] { cursor: grab; touch-action: none; user-select: none; }
+  #canvas.dragging [data-table] { cursor: grabbing; }
+  .preview-toolbar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .preview-toolbar h2 { margin: 0 auto 0 0; font-size: inherit; }
+  .preview-toolbar button { padding: 3px 8px; }
+  #zoom-level { min-width: 4ch; text-align: center; font-variant-numeric: tabular-nums; }
   .status { border-top: 1px solid #d4dce7; border-bottom: 0; padding: 8px 13px; }
   #notices { margin: 5px 0 0; padding-left: 20px; max-height: 7em; overflow: auto; color: #794411; }
   #notices:empty { display: none; }
@@ -36,6 +42,7 @@
   <h1>DDL → ER-диаграмма</h1>
   <button type="button" id="build">Построить</button>
   <button type="button" id="download" disabled>Скачать .drawio</button>
+  <button type="button" id="download-png" disabled>Скачать PNG</button>
 </header>
 <main>
   <section class="editor" aria-labelledby="sql-title">
@@ -52,7 +59,13 @@ CREATE TABLE orders (
 );</textarea>
   </section>
   <section aria-labelledby="diagram-title">
-    <h2 class="pane-title" id="diagram-title">Предпросмотр</h2>
+    <div class="pane-title preview-toolbar">
+      <h2 id="diagram-title">Предпросмотр</h2>
+      <button type="button" id="zoom-out" aria-label="Уменьшить масштаб">−</button>
+      <output id="zoom-level" aria-label="Масштаб">100%</output>
+      <button type="button" id="zoom-in" aria-label="Увеличить масштаб">+</button>
+      <button type="button" id="zoom-fit">Вписать</button>
+    </div>
     <div id="canvas" tabindex="0" aria-label="Область диаграммы"></div>
   </section>
 </main>

@@ -78,7 +78,7 @@ export function preview({ tables, links, width, height }) {
     element(line, 'title', {}, link.label);
   }
   for (const table of tables) {
-    const group = element(svg, 'g', { transform: 'translate(' + table.x + ' ' + table.y + ')' });
+    const group = element(svg, 'g', { transform: 'translate(' + table.x + ' ' + table.y + ')', 'data-table': table.id });
     element(group, 'rect', { width: table.width, height: header, fill: colors.header, stroke: colors.stroke });
     element(group, 'text', {
       x: table.width / 2, y: 22, 'text-anchor': 'middle', 'font-size': 13,
