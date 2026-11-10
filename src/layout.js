@@ -31,24 +31,39 @@ export function placeTables(tables, links) {
   const blocks = [];
   for (const group of groups) {
     let top = margin;
-    const roots = group.filter(table => !parents.get(table).size);
+    // A parent used by just one junction can sit beside that junction.
+    const companions = new Map();
+    const localParents = new Set();
+    for (const table of group) {
+      const [dependent] = children.get(table);
+      if (parents.get(table).size || children.get(table).size !== 1 ||
+        parents.get(dependent).size < 2) continue;
+      if (!companions.has(dependent)) companions.set(dependent, []);
+      companions.get(dependent).push(table);
+      localParents.add(table);
+    }
+    const core = group.filter(table => !localParents.has(table));
+    const roots = core.filter(table =>
+      [...parents.get(table)].every(parent => localParents.has(parent)));
     const ranked = new Set(roots);
     const layers = [];
     const heightBudget = group.length < 20 ? Infinity : Math.sqrt(group.reduce((area, table) =>
       area + (table.width + 110) * (table.height + verticalGap), 0));
-    let layer = roots.length ? roots : [group[0]];
+    let layer = roots.length ? roots : [core[0]];
     ranked.add(layer[0]);
     while (layer.length) {
       let column = [];
       let height = 0;
       for (const table of layer) {
-        if (column.length && height + table.height > heightBudget) {
+        const cluster = [table, ...companions.get(table) ?? []];
+        const clusterHeight = cluster.reduce((sum, item) => sum + item.height + verticalGap, 0);
+        if (column.length && height + clusterHeight - verticalGap > heightBudget) {
           layers.push(column);
           column = [];
           height = 0;
         }
-        column.push(table);
-        height += table.height + verticalGap;
+        column.push(...cluster);
+        height += clusterHeight;
       }
       layers.push(column);
       const next = [];
@@ -59,15 +74,15 @@ export function placeTables(tables, links) {
           next.push(child);
         }
       }
-      if (!next.length && ranked.size < group.length) {
-        const cycle = group.find(table => !ranked.has(table));
+      if (!next.length && ranked.size < core.length) {
+        const cycle = core.find(table => !ranked.has(table));
         ranked.add(cycle);
         next.push(cycle);
       }
       layer = next;
     }
 
-    const groupLinks = links.filter(link => ranked.has(link.from));
+    const groupLinks = links.filter(link => ranked.has(link.from) || localParents.has(link.from));
     const tracks = layers.map(() => 0);
     const detours = [];
     const incoming = new Map();
