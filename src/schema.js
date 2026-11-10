@@ -125,32 +125,53 @@ export function readSchema({ stmts }, inferRelations = false) {
   if (inferRelations) {
     const connected = new Set(links.map(link => link.source));
     const candidates = [...tables.values()].flatMap(table => {
-      if (table.primaryKey.length !== 1) return [];
-      const primary = table.columns.get(table.primaryKey[0]);
-      return primary ? [{ table, primary, pattern: table.relation.relname + '_' + primary.name }] : [];
+      const key = table.primaryKey.map(name => table.columns.get(name));
+      if (!key.length || key.some(column => !column)) return [];
+      return [{ table, key, patterns: key.map(column => table.relation.relname + '_' + column.name) }];
     });
     for (const table of tables.values()) {
-      for (const column of table.columns.values()) {
-        if (connected.has(column)) continue;
-        const matches = candidates.filter(({ primary, pattern }) =>
-          primary !== column && column.name.includes(pattern));
-        if (matches.length > 1) {
-          warnings.push(table.name + '.' + column.name +
-            ': несколько кандидатов для связи — ' + matches.map(({ table, primary }) =>
-              table.name + '.' + primary.name).join(', ') + '.');
+      const available = [...table.columns.values()].filter(column => !connected.has(column));
+      const proposals = [];
+      const claims = new Map();
+      for (const { table: target, key, patterns } of candidates) {
+        const matches = patterns.map((pattern, index) => available.filter(column =>
+          column !== key[index] && column.name.includes(pattern)));
+        if (key.length === 1) {
+          for (const source of matches[0]) proposals.push({ target, key, rows: [source] });
           continue;
         }
-        if (!matches.length) continue;
-        const { table: target, primary } = matches[0];
+        if (matches.some(rows => !rows.length)) continue;
+        const rows = matches.map(([row]) => row);
+        if (matches.some(matchesForColumn => matchesForColumn.length !== 1) ||
+          new Set(rows).size !== key.length) {
+          warnings.push(table.name + ' → ' + target.name +
+            ': неоднозначное соответствие столбцов составного ключа.');
+          continue;
+        }
+        proposals.push({ target, key, rows });
+      }
+      for (const proposal of proposals) {
+        for (const row of proposal.rows) claims.set(row, (claims.get(row) ?? 0) + 1);
+      }
+      for (const [column, count] of claims) {
+        if (count > 1) warnings.push(table.name + '.' + column.name +
+          ': несколько кандидатов для предполагаемой связи.');
+      }
+      for (const { target, key, rows } of proposals) {
+        if (rows.some(row => claims.get(row) !== 1)) continue;
         const unique = [table.primaryKey, ...table.uniqueKeys]
-          .some(key => key.length === 1 && key[0] === column.name);
-        column.inferred = true;
-        links.push({
-          source: column, target: primary, from: table, to: target, inferred: true,
-          label: 'Предполагаемая связь: ' + table.name + '.' + column.name +
-            ' → ' + target.name + '.' + primary.name,
-          startMarker: unique ? 'ERzeroToOne' : 'ERzeroToMany',
-          endMarker: column.required ? 'ERmandOne' : 'ERzeroToOne',
+          .some(columns => columns.length && columns.every(name => rows.some(row => row.name === name)));
+        const optional = rows.some(row => !row.required);
+        const label = 'Предполагаемая связь: ' + table.name + ' (' +
+          rows.map(row => row.name).join(', ') + ') → ' + target.name + ' (' +
+          key.map(row => row.name).join(', ') + ')';
+        rows.forEach((source, index) => {
+          source.inferred = true;
+          links.push({
+            source, target: key[index], from: table, to: target, inferred: true, label,
+            startMarker: unique ? 'ERzeroToOne' : 'ERzeroToMany',
+            endMarker: optional ? 'ERzeroToOne' : 'ERmandOne',
+          });
         });
       }
     }
