@@ -28,16 +28,29 @@ export function placeTables(tables, links) {
   }
   groups.sort((a, b) => b.length - a.length);
 
-  let top = margin;
-  let width = 0;
+  const blocks = [];
   for (const group of groups) {
+    let top = margin;
     const roots = group.filter(table => !parents.get(table).size);
     const ranked = new Set(roots);
     const layers = [];
+    const heightBudget = group.length < 20 ? Infinity : Math.sqrt(group.reduce((area, table) =>
+      area + (table.width + 110) * (table.height + verticalGap), 0));
     let layer = roots.length ? roots : [group[0]];
     ranked.add(layer[0]);
     while (layer.length) {
-      layers.push(layer);
+      let column = [];
+      let height = 0;
+      for (const table of layer) {
+        if (column.length && height + table.height > heightBudget) {
+          layers.push(column);
+          column = [];
+          height = 0;
+        }
+        column.push(table);
+        height += table.height + verticalGap;
+      }
+      layers.push(column);
       const next = [];
       for (const table of layer) {
         for (const child of children.get(table)) {
@@ -122,10 +135,32 @@ export function placeTables(tables, links) {
         link.points = [[x1, y1], [a, y1], [a, track], [b, track], [b, approach], ...tail];
       }
     }
-    width = Math.max(width, x + margin);
-    top = bottom + verticalGap;
+    blocks.push({ tables: group, links: groupLinks, width: x, height: bottom });
   }
-  return { width, height: top };
+
+  // Pack complete connected groups without changing their internal routes.
+  const shelfWidth = Math.max(...blocks.map(block => block.width),
+    Math.sqrt(blocks.reduce((area, block) => area + block.width * block.height, 0) * 1.5));
+  let x = 0;
+  let y = 0;
+  let shelfHeight = 0;
+  let width = 0;
+  for (const block of blocks) {
+    if (x && x + block.width > shelfWidth) {
+      x = 0;
+      y += shelfHeight;
+      shelfHeight = 0;
+    }
+    for (const table of block.tables) {
+      table.x += x;
+      table.y += y;
+    }
+    for (const link of block.links) link.points = link.points.map(([px, py]) => [px + x, py + y]);
+    x += block.width;
+    width = Math.max(width, x);
+    shelfHeight = Math.max(shelfHeight, block.height);
+  }
+  return { width: width + margin, height: y + shelfHeight + margin };
 }
 
 // Keep the automatic layout intact for links unrelated to the moved table.

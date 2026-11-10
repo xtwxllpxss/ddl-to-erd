@@ -11,6 +11,7 @@
   header { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 16px; }
   h1 { margin: 0 auto 0 0; font-size: 18px; }
   button { font: inherit; font-weight: 600; border: 1px solid #b6c5d8; border-radius: 5px; padding: 7px 11px; background: #fff; color: #223e60; cursor: pointer; }
+  .infer-option { display: inline-flex; align-items: center; gap: 5px; }
   #build { background: #24588f; color: #fff; border-color: #24588f; }
   button:disabled { opacity: .5; cursor: default; }
   :focus-visible { outline: 2px solid #376db0; outline-offset: -2px; }
@@ -40,6 +41,7 @@
 <body>
 <header>
   <h1>DDL → ER-диаграмма</h1>
+  <label class="infer-option"><input type="checkbox" id="infer-relations"> Предположить связи</label>
   <button type="button" id="build">Построить</button>
   <button type="button" id="download" disabled>Скачать .drawio</button>
   <button type="button" id="download-png" disabled>Скачать PNG</button>

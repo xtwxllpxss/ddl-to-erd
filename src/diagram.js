@@ -24,13 +24,13 @@ export function layout({ tables, links }) {
   for (const table of tables) {
     const rows = [...table.columns.values()];
     rows.forEach((row, index) => {
-      row.tags = [row.primary && 'PK', row.foreign && 'FK'].filter(Boolean).join('/');
+      row.tags = [row.primary && 'PK', row.inferred ? 'FK?' : row.foreign && 'FK'].filter(Boolean).join('/');
       row.nullability = row.required ? 'NOT NULL' : 'NULL';
       row.offset = header + index * rowHeight;
     });
     const columnWidth = values => Math.ceil(Math.max(0, ...values.map(textWidth)) + fieldPadding * 2);
     table.fieldWidths = [
-      columnWidth(['PK/FK']),
+      columnWidth(['PK/FK?']),
       Math.max(80, columnWidth(rows.map(row => row.name))),
       Math.max(65, columnWidth(rows.map(row => row.type))),
       columnWidth(['NOT NULL']),
@@ -73,6 +73,7 @@ export function preview({ tables, links, width, height }) {
   for (const link of links) {
     const line = element(svg, 'polyline', {
       points: link.points.map(point => point.join(',')).join(' '),
+      ...(link.inferred ? { 'stroke-dasharray': '6 4' } : {}),
       fill: 'none', stroke: colors.edge, 'stroke-width': 1.4, 'marker-start': 'url(#' + link.startMarker + ')', 'marker-end': 'url(#' + link.endMarker + '-end)',
     });
     element(line, 'title', {}, link.label);
@@ -156,7 +157,7 @@ export function drawio({ tables, links }) {
     const wrapper = add(root, 'object', { id: 'relation-' + index, label: '', tooltip: link.label });
     const edge = add(wrapper, 'mxCell', {
       edge: 1, parent: 1, source: link.source.id, target: link.target.id,
-      style: 'startArrow=' + link.startMarker + ';endArrow=' + link.endMarker +
+      style: (link.inferred ? 'dashed=1;dashPattern=6 4;' : '') + 'startArrow=' + link.startMarker + ';endArrow=' + link.endMarker +
         ';startSize=10;endSize=10;startFill=0;endFill=0;strokeWidth=1.4;strokeColor=' + colors.edge +
         ';exitPerimeter=0;entryPerimeter=0;exitY=0.5;entryY=' + link.entryY +
         ';exitX=' + Number(link.sourceRight) + ';entryX=' + Number(link.targetRight) + ';',

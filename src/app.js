@@ -1,10 +1,11 @@
-import { loadModule, parse } from 'libpg-query';
+import { loadModule } from 'libpg-query';import { parseDdl } from './ddl.js';
 import { readSchema } from './schema.js';
 import { drawio, layout, preview } from './diagram.js';
 import { moveTable } from './layout.js';
 import { diagramPng } from './png.js';
 
 const sql = document.querySelector('#sql');
+const inferRelations = document.querySelector('#infer-relations');
 const build = document.querySelector('#build');
 const download = document.querySelector('#download');
 const png = document.querySelector('#download-png');
@@ -106,12 +107,13 @@ async function render() {
   endDrag();
   updateControls();
   build.disabled = true;
+  inferRelations.disabled = true;
   notices.replaceChildren();
   status.textContent = 'Разбираем SQL…';
   try {
     ready ??= loadModule({ wasm: Uint8Array.from(atob(PARSER_WASM), char => char.charCodeAt(0)) });
     await ready;
-    const schema = readSchema(await parse(sql.value));
+    const schema = readSchema(await parseDdl(sql.value), inferRelations.checked);
     if (current !== revision) return;
     for (const warning of schema.warnings) {
       const item = document.createElement('li');
@@ -127,7 +129,9 @@ async function render() {
     zoom = 1;
     drawPreview();
     canvas.scrollTo(0, 0);
-    status.textContent = 'Таблиц: ' + model.tables.length + ' · Линий FK: ' + model.links.length;
+    const inferred = model.links.filter(link => link.inferred).length;
+    status.textContent = 'Таблиц: ' + model.tables.length + ' · Линий FK: ' + (model.links.length - inferred);
+    if (inferRelations.checked) status.textContent += ' · Предположено: ' + inferred;
     updateControls();
   } catch (error) {
     if (current !== revision) return;
@@ -138,10 +142,12 @@ async function render() {
     }
   } finally {
     build.disabled = false;
+    inferRelations.disabled = false;
   }
 }
 
 build.addEventListener('click', render);
+inferRelations.addEventListener('change', render);
 function save(file, name) {
   const url = URL.createObjectURL(file);
   const link = document.createElement('a');

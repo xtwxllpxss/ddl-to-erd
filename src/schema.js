@@ -19,7 +19,7 @@ function displayType(type) {
     '[]'.repeat(type.arrayBounds?.length ?? 0);
 }
 
-export function readSchema({ stmts }) {
+export function readSchema({ stmts }, inferRelations = false) {
   const tables = new Map();
   const warnings = [];
   const foreignKeys = [];
@@ -121,6 +121,39 @@ export function readSchema({ stmts }) {
       label, startMarker: unique ? 'ERzeroToOne' : 'ERzeroToMany',
       endMarker: optional ? 'ERzeroToOne' : 'ERmandOne',
     }));
+  }
+  if (inferRelations) {
+    const connected = new Set(links.map(link => link.source));
+    const candidates = [...tables.values()].flatMap(table => {
+      if (table.primaryKey.length !== 1) return [];
+      const primary = table.columns.get(table.primaryKey[0]);
+      return primary ? [{ table, primary, pattern: table.relation.relname + '_' + primary.name }] : [];
+    });
+    for (const table of tables.values()) {
+      for (const column of table.columns.values()) {
+        if (connected.has(column)) continue;
+        const matches = candidates.filter(({ primary, pattern }) =>
+          primary !== column && column.name.includes(pattern));
+        if (matches.length > 1) {
+          warnings.push(table.name + '.' + column.name +
+            ': несколько кандидатов для связи — ' + matches.map(({ table, primary }) =>
+              table.name + '.' + primary.name).join(', ') + '.');
+          continue;
+        }
+        if (!matches.length) continue;
+        const { table: target, primary } = matches[0];
+        const unique = [table.primaryKey, ...table.uniqueKeys]
+          .some(key => key.length === 1 && key[0] === column.name);
+        column.inferred = true;
+        links.push({
+          source: column, target: primary, from: table, to: target, inferred: true,
+          label: 'Предполагаемая связь: ' + table.name + '.' + column.name +
+            ' → ' + target.name + '.' + primary.name,
+          startMarker: unique ? 'ERzeroToOne' : 'ERzeroToMany',
+          endMarker: column.required ? 'ERmandOne' : 'ERzeroToOne',
+        });
+      }
+    }
   }
   return { tables: [...tables.values()], links, warnings };
 }
