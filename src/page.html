@@ -23,6 +23,8 @@
   #canvas { flex: 1; min-height: 0; overflow: auto; background-color: #f9fafc; background-image: linear-gradient(#e7ebf1 1px, transparent 1px), linear-gradient(90deg, #e7ebf1 1px, transparent 1px); background-size: 10px 10px; }
   #canvas svg { display: block; }
   #canvas [data-table] { cursor: grab; touch-action: none; user-select: none; }
+  #canvas [data-column].connection-source > rect { fill: #e1efff; stroke: #24588f; }
+  #canvas.connecting [data-column] { cursor: crosshair; }
   #canvas.dragging [data-table] { cursor: grabbing; }
   .preview-toolbar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
   .preview-toolbar h2 { margin: 0 auto 0 0; font-size: inherit; }
@@ -62,7 +64,7 @@ CREATE TABLE orders (
   </section>
   <section aria-labelledby="diagram-title">
     <div class="pane-title preview-toolbar">
-      <h2 id="diagram-title">Предпросмотр</h2>
+      <h2 id="diagram-title" title="ПКМ по двум полям создаёт связь. Esc отменяет выбор.">Предпросмотр</h2>
       <button type="button" id="zoom-out" aria-label="Уменьшить масштаб">−</button>
       <output id="zoom-level" aria-label="Масштаб">100%</output>
       <button type="button" id="zoom-in" aria-label="Увеличить масштаб">+</button>

@@ -86,15 +86,16 @@ export function preview({ tables, links, width, height }) {
       'font-family': 'Arial', 'font-weight': 'bold', fill: colors.ink,
     }, table.name);
     for (const row of table.columns.values()) {
-      element(group, 'rect', {
+      const fieldRow = element(group, 'g', { 'data-column': row.id });
+      element(fieldRow, 'rect', {
         y: row.offset, width: table.width, height: rowHeight, fill: 'white', stroke: colors.stroke,
       });
       let x = 0;
       fields(row).forEach(({ text, color, bold }, index) => {
-        if (index) element(group, 'line', {
+        if (index) element(fieldRow, 'line', {
           x1: x, x2: x, y1: row.offset, y2: row.offset + rowHeight, stroke: colors.stroke,
         });
-        element(group, 'text', {
+        element(fieldRow, 'text', {
           x: x + fieldPadding, y: row.offset + 17, 'font-family': 'monospace',
           'font-size': 13, 'font-weight': bold ? 'bold' : 'normal', fill: color,
         }, text);

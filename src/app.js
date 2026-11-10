@@ -1,4 +1,5 @@
-import { loadModule } from 'libpg-query';import { parseDdl } from './ddl.js';
+import { loadModule } from 'libpg-query';
+import { parseDdl } from './ddl.js';
 import { readSchema } from './schema.js';
 import { drawio, layout, preview } from './diagram.js';
 import { moveTable } from './layout.js';
@@ -21,6 +22,9 @@ let ready;
 let revision = 0;
 let zoom = 1;
 let drag;
+let connection;
+let manualLayout = false;
+let gestureZoom;
 let exportingPng = false;
 
 function updateControls() {
@@ -38,16 +42,31 @@ function drawPreview() {
   svg.setAttribute('width', model.width * zoom);
   svg.setAttribute('height', model.height * zoom);
   canvas.replaceChildren(svg);
+  if (connection) {
+    svg.querySelector('[data-column="' + connection.row.id + '"]').classList.add('connection-source');
+    const line = document.createElementNS(svg.namespaceURI, 'line');
+    line.setAttribute('stroke', '#24588f');
+    line.setAttribute('stroke-width', '1.5');
+    line.setAttribute('stroke-dasharray', '6 4');
+    line.setAttribute('pointer-events', 'none');
+    line.setAttribute('marker-end', 'url(#ERmandOne-end)');
+    svg.append(line);
+    connection.line = line;
+    updateConnectionPointer();
+  }
 }
 
-function setZoom(next) {
+function setZoom(next, x = canvas.clientWidth / 2, y = canvas.clientHeight / 2) {
   if (!model || drag) return;
   const previous = zoom;
   zoom = Math.max(0.01, Math.min(3, next));
-  const left = (canvas.scrollLeft + canvas.clientWidth / 2) * zoom / previous;
-  const top = (canvas.scrollTop + canvas.clientHeight / 2) * zoom / previous;
-  drawPreview();
-  canvas.scrollTo(left - canvas.clientWidth / 2, top - canvas.clientHeight / 2);
+  const left = (canvas.scrollLeft + x) * zoom / previous;
+  const top = (canvas.scrollTop + y) * zoom / previous;
+  const svg = canvas.firstElementChild;
+  svg.setAttribute('width', model.width * zoom);
+  svg.setAttribute('height', model.height * zoom);
+  canvas.scrollTo(left - x, top - y);
+  updateConnectionPointer();
   updateControls();
 }
 
@@ -56,6 +75,105 @@ zoomOut.addEventListener('click', () => setZoom(zoom / 1.25));
 zoomFit.addEventListener('click', () => {
   setZoom(Math.min(1, canvas.clientWidth / model.width, canvas.clientHeight / model.height));
   canvas.scrollTo(0, 0);
+});
+
+function zoomAt(event, next) {
+  const bounds = canvas.getBoundingClientRect();
+  setZoom(next, event.clientX - bounds.left, event.clientY - bounds.top);
+}
+
+canvas.addEventListener('wheel', event => {
+  if (!model || !event.ctrlKey) return;
+  event.preventDefault();
+  const delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 400 : 1);
+  zoomAt(event, zoom * Math.exp(-delta * 0.01));
+}, { passive: false });
+
+canvas.addEventListener('gesturestart', event => {
+  if (!model) return;
+  event.preventDefault();
+  gestureZoom = zoom;
+}, { passive: false });
+canvas.addEventListener('gesturechange', event => {
+  if (!model || gestureZoom === undefined) return;
+  event.preventDefault();
+  zoomAt(event, gestureZoom * event.scale);
+}, { passive: false });
+canvas.addEventListener('gestureend', event => {
+  if (gestureZoom === undefined) return;
+  event.preventDefault();
+  gestureZoom = undefined;
+}, { passive: false });
+
+function updateConnectionPointer() {
+  if (!connection) return;
+  const { table, row, line, clientX, clientY } = connection;
+  const bounds = canvas.getBoundingClientRect();
+  const x = (clientX - bounds.left + canvas.scrollLeft) / zoom;
+  const y = (clientY - bounds.top + canvas.scrollTop) / zoom;
+  line.setAttribute('x1', table.x + (x > table.x + table.width / 2 ? table.width : 0));
+  line.setAttribute('y1', table.y + row.offset + 12.5);
+  line.setAttribute('x2', x);
+  line.setAttribute('y2', y);
+}
+
+function clearConnection() {
+  connection = undefined;
+  canvas.classList.remove('connecting');
+}
+
+function diagramStatus(message) {
+  const inferred = model.links.filter(link => link.inferred).length;
+  const manual = model.links.filter(link => link.manual).length;
+  status.textContent = 'Таблиц: ' + model.tables.length + ' · Линий FK: ' +
+    (model.links.length - inferred - manual);
+  if (inferRelations.checked) status.textContent += ' · Предположено: ' + inferred;
+  if (manual) status.textContent += ' · Вручную: ' + manual;
+  if (message) status.textContent += ' · ' + message;
+}
+
+canvas.addEventListener('contextmenu', event => {
+  const field = event.target.closest('[data-column]');
+  if (!model || !field || drag) return;
+  event.preventDefault();
+  const table = model.tables.find(candidate => candidate.id === field.parentNode.dataset.table);
+  const row = [...table.columns.values()].find(column => column.id === field.dataset.column);
+  if (!connection) {
+    connection = { table, row, clientX: event.clientX, clientY: event.clientY };
+    canvas.classList.add('connecting');
+    drawPreview();
+    diagramStatus(table.name + '.' + row.name + ' → выберите целевое поле ПКМ. Esc — отмена.');
+    return;
+  }
+
+  const { table: from, row: source } = connection;
+  clearConnection();
+  if (source === row || model.links.some(link => link.source === source && link.target === row)) {
+    drawPreview();
+    diagramStatus(source === row ? 'Выбор отменён.' : 'Такая связь уже есть.');
+    return;
+  }
+
+  const unique = [from.primaryKey, ...from.uniqueKeys]
+    .some(key => key.length === 1 && key[0] === source.name);
+  model.links.push({
+    source, target: row, from, to: table, manual: true, entryY: 0.5,
+    label: 'Ручная связь: ' + from.name + '.' + source.name + ' → ' + table.name + '.' + row.name,
+    startMarker: unique ? 'ERzeroToOne' : 'ERzeroToMany',
+    endMarker: source.required ? 'ERmandOne' : 'ERzeroToOne',
+  });
+  if (manualLayout) moveTable(model, from, from.x, from.y);
+  else model = layout(model);
+  drawPreview();
+  diagramStatus('Ручная связь добавлена.');
+});
+
+canvas.addEventListener('scroll', updateConnectionPointer);
+document.addEventListener('keydown', event => {
+  if (event.key !== 'Escape' || !connection) return;
+  clearConnection();
+  drawPreview();
+  diagramStatus('Выбор отменён.');
 });
 
 function endDrag() {
@@ -68,7 +186,7 @@ function endDrag() {
 
 canvas.addEventListener('pointerdown', event => {
   const group = event.target.closest('[data-table]');
-  if (!model || !group || drag || event.button !== 0) return;
+  if (!model || !group || drag || connection || event.button !== 0) return;
   const table = model.tables.find(candidate => candidate.id === group.dataset.table);
   drag = { pointer: event.pointerId, table, x: table.x, y: table.y,
     startX: event.clientX + canvas.scrollLeft, startY: event.clientY + canvas.scrollTop };
@@ -78,9 +196,15 @@ canvas.addEventListener('pointerdown', event => {
 });
 
 canvas.addEventListener('pointermove', event => {
+  if (connection) {
+    connection.clientX = event.clientX;
+    connection.clientY = event.clientY;
+    updateConnectionPointer();
+  }
   if (drag?.pointer !== event.pointerId || !model) return;
   const x = drag.x + (event.clientX + canvas.scrollLeft - drag.startX) / zoom;
   const y = drag.y + (event.clientY + canvas.scrollTop - drag.startY) / zoom;
+  manualLayout = true;
   moveTable(model, drag.table, x, y);
   drawPreview();
 });
@@ -94,6 +218,7 @@ for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) {
 
 sql.addEventListener('input', () => {
   revision += 1;
+  clearConnection();
   model = undefined;
   endDrag();
   updateControls();
@@ -103,6 +228,7 @@ sql.addEventListener('input', () => {
 
 async function render() {
   const current = revision;
+  clearConnection();
   model = undefined;
   endDrag();
   updateControls();
@@ -126,12 +252,11 @@ async function render() {
       return;
     }
     model = layout(schema);
+    manualLayout = false;
     zoom = 1;
     drawPreview();
     canvas.scrollTo(0, 0);
-    const inferred = model.links.filter(link => link.inferred).length;
-    status.textContent = 'Таблиц: ' + model.tables.length + ' · Линий FK: ' + (model.links.length - inferred);
-    if (inferRelations.checked) status.textContent += ' · Предположено: ' + inferred;
+    diagramStatus();
     updateControls();
   } catch (error) {
     if (current !== revision) return;
